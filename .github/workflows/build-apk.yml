@@ -8,9 +8,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
-    env:
-      ANDROID_HOME: /usr/local/lib/android/sdk
-      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -27,64 +24,40 @@ jobs:
           java-version: '21'
           distribution: 'temurin'
 
-      - name: Install Android SDK platform
-        run: |
-          echo "Listing available SDKs:"
-          ls $ANDROID_HOME/platforms/ 2>/dev/null || echo "No platforms dir"
-          ls $ANDROID_HOME/build-tools/ 2>/dev/null || echo "No build-tools dir"
-
-          # Install platform 34 and build-tools if needed
-          if [ -f "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
-            SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-          elif [ -f "$ANDROID_HOME/cmdline-tools/tools/bin/sdkmanager" ]; then
-            SDKMANAGER="$ANDROID_HOME/cmdline-tools/tools/bin/sdkmanager"
-          elif command -v sdkmanager &> /dev/null; then
-            SDKMANAGER="sdkmanager"
-          else
-            echo "sdkmanager not found, downloading cmdline-tools..."
-            mkdir -p $ANDROID_HOME/cmdline-tools
-            curl -sL -o /tmp/cmdline-tools.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
-            unzip -qo /tmp/cmdline-tools.zip -d $ANDROID_HOME/cmdline-tools
-            mv $ANDROID_HOME/cmdline-tools/cmdline-tools $ANDROID_HOME/cmdline-tools/latest 2>/dev/null || true
-            SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-          fi
-
-          echo "Accepting licenses..."
-          yes | $SDKMANAGER --sdk_root=$ANDROID_HOME --licenses > /dev/null 2>&1 || true
-
-          echo "Installing Android SDK 34..."
-          $SDKMANAGER --sdk_root=$ANDROID_HOME "platforms;android-34" "build-tools;34.0.0"
-
-          echo "Installed platforms:"
-          ls $ANDROID_HOME/platforms/ 2>/dev/null
-          echo "Installed build-tools:"
-          ls $ANDROID_HOME/build-tools/ 2>/dev/null
-
-      - name: Install npm dependencies
+      - name: Install dependencies
         run: npm ci
 
       - name: Sync Capacitor
         run: npx cap sync android
 
-      - name: Cache Gradle
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: gradle-${{ runner.os }}-${{ hashFiles('android/**/*.gradle*', 'android/gradle-wrapper.properties') }}
-          restore-keys: |
-            gradle-${{ runner.os }}-
+      - name: Debug env
+        run: |
+          echo "=== Java ==="
+          java -version 2>&1
+          echo "=== ANDROID_HOME ==="
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          ls -la $ANDROID_HOME/ 2>/dev/null || echo "ANDROID_HOME not found at default"
+          # Try common locations
+          for d in /usr/local/lib/android/sdk /opt/android $HOME/android-sdk; do
+            if [ -d "$d" ]; then
+              echo "Found SDK at: $d"
+              ls "$d/platforms/" 2>/dev/null || echo "  No platforms dir"
+              ls "$d/build-tools/" 2>/dev/null || echo "  No build-tools dir"
+            fi
+          done
+          echo "=== Gradle wrapper ==="
+          ls -la android/gradlew android/gradle/wrapper/gradle-wrapper.jar 2>/dev/null
 
       - name: Build APK
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleDebug --stacktrace --no-daemon
+          ./gradlew assembleDebug --stacktrace --no-daemon 2>&1
         env:
           GRADLE_OPTS: -Dorg.gradle.jvmargs="-Xmx2048m"
 
       - name: Upload APK
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: wordmaster-debug
